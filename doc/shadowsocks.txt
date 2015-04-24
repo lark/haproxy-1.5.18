@@ -1,0 +1,16 @@
+The shadowsocks implementation supports 'ss-redir' functionality (server).
+
+Example:
+
+listen shadowsocks
+        bind :3333
+        mode tcp
+        server linode 1.2.3.4:2222 shadowsocks method table secret xxxxxxx
+        server bluevm 5.6.7.8:4444 shadowsocks method aes-256-cfb secret yyyyyyy
+
+'ss-server' can also be implemented (listener).
+
+
+Build with (you may build with other options as well):
+
+make TARGET=linux2628 USE_SHADOWSOCKS=1 USE_TFO=1

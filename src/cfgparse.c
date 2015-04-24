@@ -83,6 +83,10 @@
 #include <proto/shctx.h>
 #endif /*USE_OPENSSL */
 
+#ifdef USE_SHADOWSOCKS
+#include <proto/ss_sock.h>
+#endif /* SHADOWSOCKS */
+
 /* This is the SSLv3 CLIENT HELLO packet used in conjunction with the
  * ssl-hello-chk option to ensure that the remote server speaks SSL.
  *
@@ -6813,6 +6817,10 @@ out_uri_auth_compat:
 				cfgerr += ssl_sock_prepare_srv_ctx(newsrv, curproxy);
 #endif /* USE_OPENSSL */
 
+#ifdef USE_SHADOWSOCKS
+			if (newsrv->use_shadowsocks)
+				cfgerr += ss_sock_prepare_srv_ctx(newsrv, curproxy);
+#endif /* USE_SHADOWSOCKS */
 			/* set the check type on the server */
 			newsrv->check.type = curproxy->options2 & PR_O2_CHK_ANY;
 
