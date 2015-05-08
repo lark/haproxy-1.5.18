@@ -402,10 +402,14 @@ static void ss_sock_ctx_free(struct ss_sock_ctx *sock_ctx)
 	if (sock_ctx->r.buf)
 		free(sock_ctx->r.buf);
 
-	if (sock_ctx->e_ctx)
+	if (sock_ctx->e_ctx) {
+		EVP_CIPHER_CTX_cleanup(&sock_ctx->e_ctx->evp);
 		free(sock_ctx->e_ctx);
-	if (sock_ctx->d_ctx)
+	}
+	if (sock_ctx->d_ctx) {
+		EVP_CIPHER_CTX_cleanup(&sock_ctx->d_ctx->evp);
 		free(sock_ctx->d_ctx);
+	}
 	if (sock_ctx->e_table)
 		free(sock_ctx->e_table);
 	if (sock_ctx->d_table)
@@ -544,7 +548,8 @@ static int ss_sock_encrypt(struct ss_sock_ctx *sock_ctx, const uint8_t *plain, s
 
 	if (!sock_ctx->e_ctx->init) {
 		uint8_t iv[EVP_MAX_IV_LENGTH];
-		ss_sock_ctx_set_iv(sock_ctx, iv, iv_len, 1);
+		if (ss_sock_ctx_set_iv(sock_ctx, iv, iv_len, 1))
+			return -1;
 		memcpy(sock_ctx->s.buf, iv, iv_len);
 		sock_ctx->e_ctx->init = 1;
 	}
@@ -586,7 +591,8 @@ static int ss_sock_decrypt(struct ss_sock_ctx *sock_ctx, uint8_t *plain, ssize_t
 	if (!sock_ctx->d_ctx->init) {
 		iv_len = sock_ctx->iv_len;
 		c_len -= iv_len;
-		ss_sock_ctx_set_iv(sock_ctx, (uint8_t *)crypt, iv_len, 0);
+		if (ss_sock_ctx_set_iv(sock_ctx, (uint8_t *)crypt, iv_len, 0))
+			return -1;
 		sock_ctx->d_ctx->init = 1;
 	}
 
