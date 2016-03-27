@@ -1117,7 +1117,7 @@ int build_logline(struct session *s, char *dst, size_t maxsize, struct list *lis
 
 			case LOG_FMT_DATELOCAL: // %Tl
 				get_localtime(s->logs.accept_date.tv_sec, &tm);
-				ret = localdate2str_log(tmplog, &tm, dst + maxsize - tmplog);
+				ret = localdate2str_log(tmplog, s->logs.accept_date.tv_sec, &tm, dst + maxsize - tmplog);
 				if (ret == NULL)
 					goto out;
 				tmplog = ret;
