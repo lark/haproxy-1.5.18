@@ -4152,6 +4152,12 @@ int http_process_req_common(struct session *s, struct channel *req, int an_bit, 
 	 */
 	channel_dont_connect(req);
 	req->analysers = 0; /* remove switching rules etc... */
+
+	/* Allow cookie logging
+	 */
+	if (s->be->cookie_name || s->fe->capture_name)
+		manage_client_side_cookies(s, req);
+
 	req->analysers |= AN_REQ_HTTP_TARPIT;
 	req->analyse_exp = tick_add_ifset(now_ms,  s->be->timeout.tarpit);
 	if (!req->analyse_exp)
@@ -4165,6 +4171,12 @@ int http_process_req_common(struct session *s, struct channel *req, int an_bit, 
 	goto done_without_exp;
 
  deny:	/* this request was blocked (denied) */
+
+	/* Allow cookie logging
+	 */
+	if (s->be->cookie_name || s->fe->capture_name)
+		manage_client_side_cookies(s, req);
+
 	txn->flags |= TX_CLDENY;
 	txn->status = 403;
 	s->logs.tv_request = now;
@@ -4305,8 +4317,7 @@ int http_process_request(struct session *s, struct channel *req, int an_bit)
 	 * the fields will stay coherent and the URI will not move.
 	 * This should only be performed in the backend.
 	 */
-	if ((s->be->cookie_name || s->be->appsession_name || s->fe->capture_name)
-	    && !(txn->flags & (TX_CLDENY|TX_CLTARPIT)))
+	if (s->be->cookie_name || s->be->appsession_name || s->fe->capture_name)
 		manage_client_side_cookies(s, req);
 
 	/*
