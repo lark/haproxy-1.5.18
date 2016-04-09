@@ -418,6 +418,8 @@ static void ss_sock_ctx_free(struct ss_sock_ctx *sock_ctx)
 	free(sock_ctx);
 }
 
+static int ss_sock_encrypt(struct ss_sock_ctx *sock_ctx, const uint8_t *plain, ssize_t len);
+
 static int ss_sock_init(struct connection *conn)
 {
 	struct server *srv;
@@ -489,7 +491,51 @@ static int ss_sock_init(struct connection *conn)
 				goto out_error;
 		}
 
-		/* leave init state and start pseudo handshake */
+		/* pseudo handshake: send destaddr to shadowsocks server */
+		if (!conn->xprt_st) {
+			struct session *sess;
+			struct connection *cli_conn;
+			char hdr_buf[32];
+			ssize_t len = 0;
+
+			sess = conn->owner;
+			cli_conn = objt_conn(sess->req->prod->end);
+
+			if (cli_conn)
+				conn_get_to_addr(cli_conn);
+			else
+				goto out_error;
+
+			if (cli_conn->addr.to.ss_family == AF_INET6) {
+				hdr_buf[len++] = 4;
+				memcpy(hdr_buf + len,
+				       &(((struct sockaddr_in6 *)&(cli_conn->addr.to))->sin6_addr),
+				       sizeof(struct in6_addr));
+				len += sizeof(struct in6_addr);
+				memcpy(hdr_buf + len,
+				       &(((struct sockaddr_in6 *)&(cli_conn->addr.to))->sin6_port),
+				       2);
+				len += 2;
+			} else {
+				hdr_buf[len++] = 1;
+				memcpy(hdr_buf + len,
+				       &(((struct sockaddr_in *)&(cli_conn->addr.to))->sin_addr),
+				       sizeof(struct in_addr));
+				len += sizeof(struct in_addr);
+				memcpy(hdr_buf + len,
+				       &(((struct sockaddr_in *)&(cli_conn->addr.to))->sin_port),
+				       2);
+				len += 2;
+			}
+			if (ss_sock_encrypt(sock_ctx, (uint8_t *)hdr_buf, len)) {
+				conn->err_code = CO_ER_SYS_MEMLIM;
+				goto out_error;
+			}
+			conn->xprt_st = 1;
+		}
+
+		/* start pseudo handshake */
+		conn->flags |= CO_FL_SS_SEND_DEST;
 		conn_data_want_send(conn);
 
 		return 0;
@@ -504,7 +550,6 @@ static int ss_sock_init(struct connection *conn)
 		conn->err_code = CO_ER_NOPROTO;
 		return -1;
 	}
-
 }
 
 /* encrypt plain data from provided buffer into s.buf */
@@ -653,7 +698,6 @@ static int ss_sock_from_buf(struct connection *conn, struct buffer *buf, int fla
 {
 	ssize_t ret, try, done = 0;
 	struct ss_sock_ctx *sock_ctx;
-	ssize_t len = 0;
 
 	if (!conn->xprt_ctx)
 		goto out_error;
@@ -665,48 +709,6 @@ static int ss_sock_from_buf(struct connection *conn, struct buffer *buf, int fla
 		return 0;
 
 	sock_ctx = (struct ss_sock_ctx *) conn->xprt_ctx;
-
-	/* pseudo handshake: send destaddr to shadowsocks server */
-	if (!conn->xprt_st) {
-		struct session *sess;
-		struct connection *cli_conn;
-		char hdr_buf[32];
-
-		sess = conn->owner;
-		cli_conn = objt_conn(sess->req->prod->end);
-
-		if (cli_conn)
-			conn_get_to_addr(cli_conn);
-		else
-			goto out_error;
-
-		if (cli_conn->addr.to.ss_family == AF_INET6) {
-			hdr_buf[len++] = 4;
-			memcpy(hdr_buf + len,
-			       &(((struct sockaddr_in6 *)&(cli_conn->addr.to))->sin6_addr),
-			       sizeof(struct in6_addr));
-			len += sizeof(struct in6_addr);
-			memcpy(hdr_buf + len,
-			       &(((struct sockaddr_in6 *)&(cli_conn->addr.to))->sin6_port),
-			       2);
-			len += 2;
-		} else {
-			hdr_buf[len++] = 1;
-			memcpy(hdr_buf + len,
-			       &(((struct sockaddr_in *)&(cli_conn->addr.to))->sin_addr),
-			       sizeof(struct in_addr));
-			len += sizeof(struct in_addr);
-			memcpy(hdr_buf + len,
-			       &(((struct sockaddr_in *)&(cli_conn->addr.to))->sin_port),
-			       2);
-			len += 2;
-		}
-		if (ss_sock_encrypt(sock_ctx, (uint8_t *)hdr_buf, len)) {
-			conn->err_code = CO_ER_SYS_MEMLIM;
-			goto out_error;
-		}
-		conn->xprt_st = 1;
-	}
 
 	ret = real_send(conn);
 	if (ret == 0)
@@ -799,6 +801,52 @@ read0:
 out_error:
 	conn->flags |= CO_FL_ERROR;
 	return done;
+}
+
+int ss_sock_handshake(struct connection *conn, unsigned int flag)
+{
+	int ret;
+	struct ss_sock_ctx *sock_ctx;
+
+	if (!conn_ctrl_ready(conn))
+		return 0;
+
+	if (!conn->xprt_ctx)
+		return 0;
+
+	sock_ctx = (struct ss_sock_ctx *) conn->xprt_ctx;
+
+	if ((sock_ctx->s.end - sock_ctx->s.pos)) {
+		ret = real_send(conn);
+		switch (ret) {
+		case 0:
+			conn->flags |= CO_FL_ERROR;
+			return 0;
+		case 1:
+			/* not ready for write */
+			__conn_sock_stop_recv(conn);
+			__conn_sock_want_send(conn);
+			fd_cant_send(conn->t.sock.fd);
+			return 0;
+		case 2:
+			/* connection is ready, partial write */
+			if (conn->flags & CO_FL_WAIT_L4_CONN)
+				conn->flags &= ~CO_FL_WAIT_L4_CONN;
+			__conn_sock_stop_recv(conn);
+			__conn_sock_want_send(conn);
+			fd_cant_send(conn->t.sock.fd);
+			return 0;
+		case 3:
+			/* handshake complete, clear handshake flag */
+			__conn_sock_want_recv(conn);
+			__conn_sock_want_send(conn);
+			conn->flags &= ~flag;
+			return 1;
+		}
+	}
+
+	fd_cant_send(conn->t.sock.fd);
+	return 0;
 }
 
 static void ss_sock_close(struct connection *conn)

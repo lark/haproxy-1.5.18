@@ -25,6 +25,9 @@
 #ifdef USE_OPENSSL
 #include <proto/ssl_sock.h>
 #endif
+#ifdef USE_SHADOWSOCKS
+#include <proto/ss_sock.h>
+#endif
 
 struct pool_head *pool2_connection;
 
@@ -72,6 +75,11 @@ void conn_fd_handler(int fd)
 #ifdef USE_OPENSSL
 		if (conn->flags & CO_FL_SSL_WAIT_HS)
 			if (!ssl_sock_handshake(conn, CO_FL_SSL_WAIT_HS))
+				goto leave;
+#endif
+#ifdef USE_SHADOWSOCKS
+		if (conn->flags & CO_FL_SS_SEND_DEST)
+			if (!ss_sock_handshake(conn, CO_FL_SS_SEND_DEST))
 				goto leave;
 #endif
 	}

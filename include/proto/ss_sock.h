@@ -22,6 +22,7 @@
 #define _PROTO_SS_SOCK_H
 
 int ss_sock_prepare_srv_ctx(struct server *srv, struct proxy *curproxy);
+int ss_sock_handshake(struct connection *conn, unsigned int flag);
 
 #endif /* _PROTO_SS_SOCK_H */
 
