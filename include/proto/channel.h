@@ -147,21 +147,14 @@ static inline int channel_full(const struct channel *chn)
 	if (!rem)
 		return 1; /* buffer already full */
 
-	if (rem <= global.tune.maxrewrite && !channel_may_send(chn))
+	if (rem > global.tune.maxrewrite)
+		return 0;
+
+	if (!channel_may_send(chn))
 		return 1;
 
-	/* now we know there's some room left, verify if we're touching
-	 * the reserve with some permanent input data.
-	 */
-	if (chn->to_forward >= chn->buf->i ||
-	    (CHN_INFINITE_FORWARD < MAX_RANGE(typeof(chn->buf->i)) && // just there to ensure gcc
-	     chn->to_forward == CHN_INFINITE_FORWARD))                // avoids the useless second
-		return 0;                                             // test whenever possible
-
-	rem -= global.tune.maxrewrite;
-	rem += chn->buf->o;
-	rem += chn->to_forward;
-	return rem <= 0;
+	rem = chn->buf->i + global.tune.maxrewrite - chn->buf->size;
+	return rem >= 0 && (unsigned int)rem >= chn->to_forward;
 }
 
 /* Returns true if the channel's input is already closed */
