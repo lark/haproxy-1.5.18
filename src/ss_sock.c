@@ -661,6 +661,10 @@ static int ss_sock_decrypt(struct ss_sock_ctx *sock_ctx, uint8_t *plain, ssize_t
  * 2 = partial send
  * 3 = all send
  */
+#define REAL_SEND_ERROR    0
+#define REAL_SEND_NOTREADY 1
+#define REAL_SEND_PARTIAL  2
+#define REAL_SEND_COMPLETE 3
 static inline int real_send(struct connection *conn)
 {
 	ssize_t ret, try;
@@ -710,14 +714,16 @@ static int ss_sock_from_buf(struct connection *conn, struct buffer *buf, int fla
 
 	sock_ctx = (struct ss_sock_ctx *) conn->xprt_ctx;
 
+	/* we may have data leftover from last try, try send */
 	ret = real_send(conn);
-	if (ret == 0)
+	if (ret == REAL_SEND_ERROR)
 		goto out_error;
-	else if (ret == 1 || ret == 2)
+	else if (ret == REAL_SEND_NOTREADY || ret == REAL_SEND_PARTIAL)
+		/* return 0 because no data consumed from buf */
 		return 0;
 
 	/* we can send data now */
-	while(buf->o) {
+	while (buf->o) {
 		try = bo_contig_data(buf);
 		if (try > sock_ctx->s.len)
 			try = sock_ctx->s.len;
@@ -729,10 +735,11 @@ static int ss_sock_from_buf(struct connection *conn, struct buffer *buf, int fla
 		buf->o -= try;
 
 		ret = real_send(conn);
-		if (ret == 0)
+		if (ret == REAL_SEND_ERROR)
 			goto out_error;
-		else if (ret == 1 || ret == 2)
+		else if (ret == REAL_SEND_NOTREADY || ret == REAL_SEND_PARTIAL)
 			return done;
+		/* send complete. try send more */
 	}
 	return done;
 
@@ -819,16 +826,16 @@ int ss_sock_handshake(struct connection *conn, unsigned int flag)
 	if ((sock_ctx->s.end - sock_ctx->s.pos)) {
 		ret = real_send(conn);
 		switch (ret) {
-		case 0:
+		case REAL_SEND_ERROR:
 			conn->flags |= CO_FL_ERROR;
 			return 0;
-		case 1:
+		case REAL_SEND_NOTREADY:
 			/* not ready for write */
 			__conn_sock_stop_recv(conn);
 			__conn_sock_want_send(conn);
 			fd_cant_send(conn->t.sock.fd);
 			return 0;
-		case 2:
+		case REAL_SEND_PARTIAL:
 			/* connection is ready, partial write */
 			if (conn->flags & CO_FL_WAIT_L4_CONN)
 				conn->flags &= ~CO_FL_WAIT_L4_CONN;
@@ -836,7 +843,7 @@ int ss_sock_handshake(struct connection *conn, unsigned int flag)
 			__conn_sock_want_send(conn);
 			fd_cant_send(conn->t.sock.fd);
 			return 0;
-		case 3:
+		case REAL_SEND_COMPLETE:
 			/* handshake complete, clear handshake flag */
 			__conn_sock_want_recv(conn);
 			__conn_sock_want_send(conn);
