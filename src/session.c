@@ -2186,7 +2186,7 @@ struct task *process_session(struct task *t)
 		 * to the consumer (which might possibly not be connected yet).
 		 */
 		if (!(s->req->flags & (CF_SHUTR|CF_SHUTW_NOW)))
-			channel_forward(s->req, CHN_INFINITE_FORWARD);
+			channel_forward_forever(s->req);
 	}
 
 	/* check if it is wise to enable kernel splicing to forward request data */
@@ -2333,7 +2333,7 @@ struct task *process_session(struct task *t)
 		 * to the consumer.
 		 */
 		if (!(s->rep->flags & (CF_SHUTR|CF_SHUTW_NOW)))
-			channel_forward(s->rep, CHN_INFINITE_FORWARD);
+			channel_forward_forever(s->rep);
 
 		/* if we have no analyser anymore in any direction and have a
 		 * tunnel timeout set, use it now. Note that we must respect
