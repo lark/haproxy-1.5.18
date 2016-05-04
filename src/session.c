@@ -1707,8 +1707,11 @@ struct task *process_session(struct task *t)
 		      (CF_SHUTR|CF_READ_ACTIVITY|CF_READ_TIMEOUT|CF_SHUTW|
 		       CF_WRITE_ACTIVITY|CF_WRITE_TIMEOUT|CF_ANA_TIMEOUT)) &&
 		    !((s->si[0].flags | s->si[1].flags) & (SI_FL_EXP|SI_FL_ERR)) &&
-		    ((t->state & TASK_WOKEN_ANY) == TASK_WOKEN_TIMER))
+		    ((t->state & TASK_WOKEN_ANY) == TASK_WOKEN_TIMER)) {
+			s->si[0].flags &= ~SI_FL_DONT_WAKE;
+			s->si[1].flags &= ~SI_FL_DONT_WAKE;
 			goto update_exp_and_leave;
+		}
 	}
 
 	/* 1b: check for low-level errors reported at the stream interface.
